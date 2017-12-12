@@ -29,24 +29,50 @@ class StockDataSet(object):
         if close_price_only:
             self.raw_seq = raw_df['Close'].tolist()
         else:
-            self.raw_seq = [price for tup in raw_df[['Open', 'Close']].values for price in tup]
+            # self.raw_seq = [price for tup in raw_df[['Open', 'Close']].values for price in tup]
+            self.raw_seq = raw_df[['Open', 'Close']].values
 
         self.raw_seq = np.array(self.raw_seq)
-        self.train_X, self.train_y, self.test_X, self.test_y = self._prepare_data(self.raw_seq)
+        if close_price_only:
+            self.train_X, self.train_y, self.test_X, self.test_y = self._prepare_data(
+                self.raw_seq)
+        else:
+            self.train_X, self.train_y, self.test_X, self.test_y = \
+                self._prepare_data_for_multi_col(
+                self.raw_seq)
 
     def info(self):
         return "StockDataSet [%s] train: %d test: %d" % (
             self.stock_sym, len(self.train_X), len(self.test_y))
+
+    def _prepare_data_for_multi_col(self, seq):
+
+        # # split into items of input_size
+        # seq = [np.array(seq[i * self.input_size: (i + 1) * self.input_size])
+        #        for i in range(len(seq) // self.input_size)]
+
+        # if self.normalized:
+        #     seq = [seq[0] / seq[0][0] - 1.0] + [curr / seq[i][-1] - 1.0 for i, curr in enumerate(seq[1:])]
+
+        # split into groups of num_steps
+        X = np.array([seq[i: i + self.num_steps] for i in range(len(seq) - self.num_steps)])
+        y = np.array([seq[i + self.num_steps] for i in range(len(seq) - self.num_steps)])
+        train_size = int(len(X) * (1.0 - self.test_ratio))
+        train_X, test_X = X[:train_size], X[train_size:]
+        train_y, test_y = y[:train_size], y[train_size:]
+        return train_X, train_y, test_X, test_y
+
 
     def _prepare_data(self, seq):
         # split into items of input_size
         seq = [np.array(seq[i * self.input_size: (i + 1) * self.input_size])
                for i in range(len(seq) // self.input_size)]
 
-        if self.normalized:
-            seq = [seq[0] / seq[0][0] - 1.0] + [
-                curr / seq[i][-1] - 1.0 for i, curr in enumerate(seq[1:])]
+        # if self.normalized:
+        #     seq = [seq[0] / seq[0][0] - 1.0] + [
+        #         curr / seq[i][-1] - 1.0 for i, curr in enumerate(seq[1:])]
 
+        seq = seq[0:30000]
         # split into groups of num_steps
         X = np.array([seq[i: i + self.num_steps] for i in range(len(seq) - self.num_steps)])
         y = np.array([seq[i + self.num_steps] for i in range(len(seq) - self.num_steps)])

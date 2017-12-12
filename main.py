@@ -45,7 +45,9 @@ def load_sp500(input_size, num_steps, k=None, target_symbol=None, test_ratio=0.0
                 target_symbol,
                 input_size=input_size,
                 num_steps=num_steps,
-                test_ratio=test_ratio)
+                test_ratio=test_ratio,
+                close_price_only=True,
+                )
         ]
 
     # Load metadata of s & p 500 stocks
@@ -89,16 +91,15 @@ def main(_):
             num_steps=FLAGS.num_steps,
             input_size=FLAGS.input_size,
             keep_prob=FLAGS.keep_prob,
-            embed_size=FLAGS.embed_size,
+            embed_size=FLAGS.embed_size
         )
 
         show_all_variables()
-
         stock_data_list = load_sp500(
             FLAGS.input_size,
             FLAGS.num_steps,
             k=FLAGS.stock_count,
-            target_symbol=FLAGS.stock_symbol,
+            target_symbol=FLAGS.stock_symbol
         )
 
         if FLAGS.train:

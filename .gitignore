@@ -10,3 +10,5 @@ images/*
 .idea/
 .ipynb_checkpoints/
 tmp_data/
+.DS_Store
+venv

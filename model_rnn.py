@@ -1,14 +1,17 @@
 """
 @author: lilianweng
 """
-import numpy as np
 import os
 import random
 import re
 import shutil
 import time
+
+import matplotlib as mpl
+import numpy as np
 import tensorflow as tf
 
+mpl.use('TkAgg')
 import matplotlib.pyplot as plt
 
 from tensorflow.contrib.tensorboard.plugins import projector
@@ -52,6 +55,7 @@ class LstmRNN(object):
 
         self.logs_dir = logs_dir
         self.plots_dir = plots_dir
+        self.col_size = 2
 
         self.build_graph()
 
@@ -63,18 +67,27 @@ class LstmRNN(object):
         - learning_rate:
         """
         # inputs.shape = (number of examples, number of input, dimension of each input).
-        self.learning_rate = tf.placeholder(tf.float32, None, name="learning_rate")
+        self.learning_rate = tf.placeholder(tf.float32, None,
+                                            name="learning_rate")
 
         # Stock symbols are mapped to integers.
         self.symbols = tf.placeholder(tf.int32, [None, 1], name='stock_labels')
 
-        self.inputs = tf.placeholder(tf.float32, [None, self.num_steps, self.input_size], name="inputs")
-        self.targets = tf.placeholder(tf.float32, [None, self.input_size], name="targets")
+        self.inputs = tf.placeholder(tf.float32, [None,
+                                                  self.num_steps,
+                                                  self.input_size],
+                                     name="inputs")
+
+        self.targets = tf.placeholder(tf.float32, [None,
+                                                   self.input_size],
+                                      name="targets")
 
         def _create_one_cell():
-            lstm_cell = tf.contrib.rnn.LSTMCell(self.lstm_size, state_is_tuple=True)
+            lstm_cell = tf.contrib.rnn.LSTMCell(self.lstm_size,
+                                                state_is_tuple=True)
             if self.keep_prob < 1.0:
-                lstm_cell = tf.contrib.rnn.DropoutWrapper(lstm_cell, output_keep_prob=self.keep_prob)
+                lstm_cell = tf.contrib.rnn.DropoutWrapper(lstm_cell,
+                                                          output_keep_prob=self.keep_prob)
             return lstm_cell
 
         cell = tf.contrib.rnn.MultiRNNCell(
@@ -82,31 +95,37 @@ class LstmRNN(object):
             state_is_tuple=True
         ) if self.num_layers > 1 else _create_one_cell()
 
-        if self.embed_size > 0:
-            self.embed_matrix = tf.Variable(
-                tf.random_uniform([self.stock_count, self.embed_size], -1.0, 1.0),
-                name="embed_matrix"
-            )
-            sym_embeds = tf.nn.embedding_lookup(self.embed_matrix, self.symbols)
-            
-            # stock_label_embeds.shape = (batch_size, embedding_size)
-            stacked_symbols = tf.tile(self.symbols, [1, self.num_steps], name='stacked_stock_labels')
-            stacked_embeds = tf.nn.embedding_lookup(self.embed_matrix, stacked_symbols)
-
-            # After concat, inputs.shape = (batch_size, num_steps, lstm_size + embed_size)
-            self.inputs_with_embed = tf.concat([self.inputs, stacked_embeds], axis=2, name="inputs_with_embed")
-        else:
-            self.inputs_with_embed = tf.identity(self.inputs)
+        # if self.embed_size > 0:
+        #     self.embed_matrix = tf.Variable(
+        #         tf.random_uniform([self.stock_count, self.embed_size], -1.0,
+        #                           1.0),
+        #         name="embed_matrix"
+        #     )
+        #     sym_embeds = tf.nn.embedding_lookup(self.embed_matrix, self.symbols)
+        #
+        #     # stock_label_embeds.shape = (batch_size, embedding_size)
+        #     stacked_symbols = tf.tile(self.symbols, [1, self.num_steps],
+        #                               name='stacked_stock_labels')
+        #     stacked_embeds = tf.nn.embedding_lookup(self.embed_matrix,
+        #                                             stacked_symbols)
+        #
+        #     # After concat, inputs.shape = (batch_size, num_steps, lstm_size + embed_size)
+        #     self.inputs_with_embed = tf.concat([self.inputs, stacked_embeds],
+        #                                        axis=2, name="inputs_with_embed")
+        # else:
+        #     self.inputs_with_embed = tf.identity(self.inputs)
 
         # Run dynamic RNN
-        val, state_ = tf.nn.dynamic_rnn(cell, self.inputs, dtype=tf.float32, scope="dynamic_rnn")
+        val, state_ = tf.nn.dynamic_rnn(cell, self.inputs, dtype=tf.float32,
+                                        scope="dynamic_rnn")
 
         # Before transpose, val.get_shape() = (batch_size, num_steps, lstm_size)
         # After transpose, val.get_shape() = (num_steps, batch_size, lstm_size)
         val = tf.transpose(val, [1, 0, 2])
 
         last = tf.gather(val, int(val.get_shape()[0]) - 1, name="lstm_state")
-        ws = tf.Variable(tf.truncated_normal([self.lstm_size, self.input_size]), name="w")
+        ws = tf.Variable(tf.truncated_normal([self.lstm_size, self.input_size]),
+                         name="w")
         bias = tf.Variable(tf.constant(0.1, shape=[self.input_size]), name="b")
         self.pred = tf.matmul(last, ws) + bias
 
@@ -116,11 +135,22 @@ class LstmRNN(object):
         self.pred_summ = tf.summary.histogram("pred", self.pred)
 
         # self.loss = -tf.reduce_sum(targets * tf.log(tf.clip_by_value(prediction, 1e-10, 1.0)))
-        self.loss = tf.reduce_mean(tf.square(self.pred - self.targets), name="loss_mse")
-        self.optim = tf.train.RMSPropOptimizer(self.learning_rate).minimize(self.loss, name="rmsprop_optim")
+        # self.loss = tf.reduce_mean(tf.square(self.pred - self.targets),
+        #                            name="loss_mse")
+        self.loss = tf.losses.mean_squared_error(labels=self.targets,predictions=self.pred)
+
+
+        # self.optim = tf.train.RMSPropOptimizer(self.learning_rate).minimize(
+        #     self.loss, name="rmsprop_optim")
+
+        self.optim = tf.train.GradientDescentOptimizer(
+            self.learning_rate).minimize(
+            self.loss, name="rmsprop_optim")
+
 
         self.loss_sum = tf.summary.scalar("loss_mse", self.loss)
-        self.learning_rate_sum = tf.summary.scalar("learning_rate", self.learning_rate)
+        self.learning_rate_sum = tf.summary.scalar("learning_rate",
+                                                   self.learning_rate)
 
         self.t_vars = tf.trainable_variables()
         self.saver = tf.train.Saver()
@@ -135,7 +165,8 @@ class LstmRNN(object):
         self.merged_sum = tf.summary.merge_all()
 
         # Set up the logs folder
-        self.writer = tf.summary.FileWriter(os.path.join("./logs", self.model_name))
+        self.writer = tf.summary.FileWriter(
+            os.path.join("./logs", self.model_name))
         self.writer.add_graph(self.sess.graph)
 
         if self.use_embed:
@@ -184,7 +215,8 @@ class LstmRNN(object):
 
         global_step = 0
 
-        num_batches = sum(len(d_.train_X) for d_ in dataset_list) // config.batch_size
+        num_batches = sum(
+            len(d_.train_X) for d_ in dataset_list) // config.batch_size
         random.seed(time.time())
 
         # Select samples for plotting.
@@ -202,11 +234,13 @@ class LstmRNN(object):
         for epoch in xrange(config.max_epoch):
             epoch_step = 0
             learning_rate = config.init_learning_rate * (
-                config.learning_rate_decay ** max(float(epoch + 1 - config.init_epoch), 0.0)
+                config.learning_rate_decay ** max(
+                    float(epoch + 1 - config.init_epoch), 0.0)
             )
 
             for label_, d_ in enumerate(dataset_list):
-                for batch_X, batch_y in d_.generate_one_epoch(config.batch_size):
+                for batch_X, batch_y in d_.generate_one_epoch(
+                        config.batch_size):
                     global_step += 1
                     epoch_step += 1
                     batch_labels = np.array([[label_]] * len(batch_X))
@@ -217,26 +251,102 @@ class LstmRNN(object):
                         self.symbols: batch_labels,
                     }
                     train_loss, _, train_merged_sum = self.sess.run(
-                        [self.loss, self.optim, self.merged_sum], train_data_feed)
-                    self.writer.add_summary(train_merged_sum, global_step=global_step)
+                        [self.loss, self.optim, self.merged_sum],
+                        train_data_feed)
+                    self.writer.add_summary(train_merged_sum,
+                                            global_step=global_step)
 
-                    if np.mod(global_step, len(dataset_list) * 100 / config.input_size) == 1:
-                        test_loss, test_pred = self.sess.run([self.loss, self.pred], test_data_feed)
+                    if np.mod(global_step,
+                              len(dataset_list) * 100 / config.input_size) == 1:
+                        test_loss, test_pred = self.sess.run(
+                            [self.loss, self.pred], test_data_feed)
 
                         print "Step:%d [Epoch:%d] [Learning rate: %.6f] train_loss:%.6f test_loss:%.6f" % (
-                            global_step, epoch, learning_rate, train_loss, test_loss)
+                            global_step, epoch, learning_rate, train_loss,
+                            test_loss)
 
-                        # Plot samples
-                        for sample_sym, indices in sample_indices.iteritems():
-                            image_path = os.path.join(self.model_plots_dir, "{}_epoch{:02d}_step{:04d}.png".format(
-                                sample_sym, epoch, epoch_step))
-                            sample_preds = test_pred[indices]
-                            sample_truth = merged_test_y[indices]
-                            self.plot_samples(sample_preds, sample_truth, image_path, stock_sym=sample_sym)
+                        # # Plot samples
+                        # for sample_sym, indices in sample_indices.iteritems():
+                        #     image_path = os.path.join(self.model_plots_dir, "{}_epoch{:02d}_step{:04d}".format(
+                        #         sample_sym, epoch, epoch_step))
+                        #     sample_preds = test_pred[indices]
+                        #     sample_truth = merged_test_y[indices]
+                        #     self.plot_samples(sample_preds, sample_truth, image_path, stock_sym=sample_sym)
 
                         self.save(global_step)
 
-        final_pred, final_loss = self.sess.run([self.pred, self.loss], test_data_feed)
+                        last_window = np.array(merged_test_X[0:1])
+
+                        first_window = merged_test_X[0]
+                        recursive_day_data_feed = {
+                            self.learning_rate: 0.0,
+                            self.inputs: last_window,
+                            self.symbols: merged_test_labels,
+                        }
+
+                        num_days_to_predict = 100
+                        test_pred_consequent_days = []
+
+                        for days in range(num_days_to_predict):
+                            test_pred = self.sess.run(self.pred,
+                                                      recursive_day_data_feed)
+
+                            test_pred_consequent_days.append(test_pred[0])
+
+                            last_window = np.expand_dims(
+                                np.concatenate([last_window[0][1:],
+                                                test_pred]), 0)
+
+                            recursive_day_data_feed = {
+                                self.learning_rate: 0.0,
+                                self.inputs: last_window,
+                                self.symbols: merged_test_labels,
+                            }
+
+                        test_pred_consequent_days = np.array(
+                            test_pred_consequent_days)
+
+                        # Plot samples
+                        for sample_sym, indices in sample_indices.iteritems():
+
+                            image_path = os.path.join(self.model_plots_dir,
+                                                      "{}_epoch{:02d}_step{:04d}".format(
+                                                          sample_sym, epoch,
+                                                          epoch_step))
+
+                            sample_preds = test_pred_consequent_days
+                            sample_truth = merged_test_y[0:num_days_to_predict]
+
+                            self.plot_samples(first_window, sample_preds,
+                                              sample_truth,
+                                              image_path, stock_sym=sample_sym)
+
+
+                            # self.plot_samples(np.expand_dims(sample_truth[:,
+                            #                                  0], 1),
+                            #                   np.expand_dims(sample_truth[:,
+                            #                                  1], 1),
+                            #                   os.path.join(self.model_plots_dir,
+                            #                                "truth_correclation")
+                            #                   ,
+                            #                   stock_sym=sample_sym)
+                            #
+                            # self.plot_samples(np.expand_dims(sample_preds[:,
+                            #                                  0], 1),
+                            #                   np.expand_dims(sample_preds[:,
+                            #                                  1], 1),
+                            #                   os.path.join(
+                            #                       self.model_plots_dir,
+                            #                       "{" \
+                            #                       "}_epoch{" \
+                            #                       ":02d}_step{"
+                            #                       ":04d}_correlation".format(
+                            #                           sample_sym, epoch,
+                            #                           epoch_step)),
+                            #                   stock_sym=sample_sym)
+
+        final_pred, final_loss = self.sess.run([self.pred, self.loss],
+                                               test_data_feed)
 
         # Save the final model
         self.save(global_step)
@@ -279,8 +389,10 @@ class LstmRNN(object):
         ckpt = tf.train.get_checkpoint_state(self.model_logs_dir)
         if ckpt and ckpt.model_checkpoint_path:
             ckpt_name = os.path.basename(ckpt.model_checkpoint_path)
-            self.saver.restore(self.sess, os.path.join(self.model_logs_dir, ckpt_name))
-            counter = int(next(re.finditer("(\d+)(?!.*\d)", ckpt_name)).group(0))
+            self.saver.restore(self.sess,
+                               os.path.join(self.model_logs_dir, ckpt_name))
+            counter = int(
+                next(re.finditer("(\d+)(?!.*\d)", ckpt_name)).group(0))
             print(" [*] Success to read {}".format(ckpt_name))
             return True, counter
 
@@ -288,25 +400,38 @@ class LstmRNN(object):
             print(" [*] Failed to find a checkpoint")
             return False, 0
 
-    def plot_samples(self, preds, targets, figname, stock_sym=None):
+    def plot_samples(self, first_window, preds, targets, figname,
+                     stock_sym=None):
         def _flatten(seq):
             return [x for y in seq for x in y]
 
-        truths = _flatten(targets)[-200:]
-        preds = _flatten(preds)[-200:]
-        days = range(len(truths))[-200:]
+        for feature_num in range(targets.shape[1]):
 
-        plt.figure(figsize=(12, 6))
-        plt.plot(days, truths, label='truth')
-        plt.plot(days, preds, label='pred')
-        plt.legend(loc='upper left', frameon=False)
-        plt.xlabel("day")
-        plt.ylabel("normalized price")
-        plt.ylim((min(truths), max(truths)))
-        plt.grid(ls='--')
+            truths_col = np.concatenate((first_window[:,0],targets[:, feature_num][-200:]))
+            preds_col = np.concatenate((first_window[:, 0], preds[:,
+                                                            feature_num][-200:]))
 
-        if stock_sym:
-            plt.title(stock_sym + " | Last %d days in test" % len(truths))
+            days = range(len(truths_col))[-200:]
 
-        plt.savefig(figname, format='png', bbox_inches='tight', transparent=True)
-        plt.close()
+            plt.figure(figsize=(12, 6))
+
+            plt.plot(days, truths_col, label='truth')
+            plt.plot(days, preds_col, label='pred')
+
+            plt.legend(loc='upper left', frameon=False)
+            plt.xlabel("day")
+            plt.ylabel("normalized price")
+            plt.ylim(-1, 1)
+            plt.ylim(-1, 1)
+            # plt.ylim(-0.05, 0.05)
+            # plt.ylim((min(truths_col), max(truths_col)))
+            plt.grid(ls='--')
+
+            if stock_sym:
+                plt.title(
+                    stock_sym + " | Last %d days in test" % len(truths_col))
+
+            plt.savefig(figname + "_" + str(feature_num) + ".png", format='png',
+                        bbox_inches='tight',
+                        transparent=True)
+            plt.close()
